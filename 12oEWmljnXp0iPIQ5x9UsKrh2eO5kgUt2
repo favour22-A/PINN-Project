@@ -1,0 +1,66 @@
+@tf.function
+def train_network_multitask(t, model, gamma1=1, gamma2=1):
+
+    with tf.GradientTape() as tape:
+        with tf.GradientTape() as tape2:
+            tape2.watch(t)
+            u = model(t)
+
+        ut = tape2.gradient(u, t)
+
+        # First loss component (e.g., from first equation)
+        eqn1 = ut + u  # Replace this with the actual first equation
+        DEloss1 = tf.reduce_mean(eqn1**2)
+
+        # Second loss component (e.g., from another equation)
+        eqn2 = ut - u  # Replace this with the actual second equation
+        DEloss2 = tf.reduce_mean(eqn2**2)
+
+        # Initial condition loss
+        u0_pred = model(np.array([[t0]]))
+        IVloss = tf.reduce_mean((u0_pred - u0)**2)
+
+        # Multi-task loss
+        loss = gamma1 * DEloss1 + gamma2 * DEloss2 + IVloss
+
+    grads = tape.gradient(loss, model.trainable_variables)
+    return loss, grads
+
+
+
+
+
+
+
+@tf.function
+def train_oscillator(t, model, gamma1=1, gamma2=1):
+
+    with tf.GradientTape() as tape:
+        with tf.GradientTape() as tape2:
+            tape2.watch(t)
+            u, v = model(t)[:, 0], model(t)[:, 1]
+
+        ut = tape2.gradient(u, t)
+        vt = tape2.gradient(v, t)
+
+        # System of equations
+        eqn1 = ut - v  # du/dt = v
+        eqn2 = vt + (k/m) * u  # dv/dt = - (k/m) u
+
+        # Loss terms
+        DEloss1 = tf.reduce_mean(eqn1**2)
+        DEloss2 = tf.reduce_mean(eqn2**2)
+
+        # Initial conditions
+        u0_pred, v0_pred = model(np.array([[t0]]))[0]
+        IVloss = tf.reduce_mean((u0_pred - u0)**2 + (v0_pred - v0)**2)
+
+        # Total loss
+        loss = gamma1 * DEloss1 + gamma2 * DEloss2 + IVloss
+
+    grads = tape.gradient(loss, model.trainable_variables)
+    return loss, grads
+
+
+
+

@@ -1,0 +1,84 @@
+import tensorflow as tf
+import numpy as np
+import matplotlib.pyplot as plt
+from pyDOE import lhs  # Latin Hypercube Sampling for collocation points
+from scipy.integrate import solve_ivp
+
+# Constants for Lorenz-1960 model
+k, l = 1, 2  # As specified in the task
+
+# Initial conditions
+x0, y0, z0 = 1.0, 0.5, 1.0
+
+t0, tfinal = 0.0, 20.0  # Experiment with different tf values
+N_de = 100  # Number of collocation points
+
+def build_model(nr_units=20, nr_layers=4):
+    inp = tf.keras.layers.Input(shape=(1,))  # Single input: time t
+    x = inp
+    
+    for _ in range(nr_layers):
+        x = tf.keras.layers.Dense(nr_units, activation='tanh')(x)
+    
+    out = tf.keras.layers.Dense(3, activation='linear')(x)  # 3 outputs: x, y, z
+    
+    model = tf.keras.models.Model(inp, out)
+    return model
+
+model = build_model()
+
+# Define collocation points
+def defineCollocationPoints(t_bdry, N_de=100):
+    return t_bdry[0] + (t_bdry[1] - t_bdry[0]) * lhs(1, N_de)
+
+de_points = defineCollocationPoints([t0, tfinal], N_de)
+plt.plot(de_points[:,0], 0*de_points[:,0],'.')
+plt.xlabel('t')
+plt.title('Collocation points')
+plt.show()
+
+@tf.function
+def train_network(t, model, gamma=1):
+    with tf.GradientTape() as tape:
+        with tf.GradientTape() as tape2:
+            tape2.watch(t)
+            x_pred, y_pred, z_pred = tf.split(model(t), 3, axis=1)  # Extract x, y, z
+        
+        # Compute derivatives
+        dx_dt = tape2.gradient(x_pred, t)
+        dy_dt = tape2.gradient(y_pred, t)
+        dz_dt = tape2.gradient(z_pred, t)
+        
+        # Define Lorenz-1960 model equations
+        eq1 = dx_dt - k * l * ((1/k**2 + l**2) - (1/k**2)) * y_pred * z_pred
+        eq2 = dy_dt - k * l * ((1/l**2) - (1/k**2 + l**2)) * x_pred * z_pred
+        eq3 = dz_dt - (k * l**2) * ((1/k**2) - (1/l**2)) * x_pred * y_pred
+        
+        # Define loss functions
+        DEloss = tf.reduce_mean(eq1**2 + eq2**2 + eq3**2)
+        
+        # Initial condition loss
+        u0_pred = model(np.array([[t0]]))
+        IVloss = tf.reduce_mean((u0_pred[0,0] - x0)**2 + (u0_pred[0,1] - y0)**2 + (u0_pred[0,2] - z0)**2)
+        
+        # Total loss
+        loss = DEloss + gamma * IVloss
+    
+    grads = tape.gradient(loss, model.trainable_variables)
+    return loss, grads
+
+# Compare with solve_ivp
+sol = solve_ivp(lambda t, u: [
+    k * l * ((1/k**2 + l**2) - (1/k**2)) * u[1] * u[2],
+    k * l * ((1/l**2) - (1/k**2 + l**2)) * u[0] * u[2],
+    (k * l**2) * ((1/k**2) - (1/l**2)) * u[0] * u[1]
+], [t0, tfinal], [x0, y0, z0], t_eval=np.linspace(t0, tfinal, 100))
+
+# Plot solution
+plt.plot(sol.t, sol.y[0], label='x(t) - Runge-Kutta')
+plt.plot(sol.t, sol.y[1], label='y(t) - Runge-Kutta')
+plt.plot(sol.t, sol.y[2], label='z(t) - Runge-Kutta')
+plt.legend()
+plt.xlabel('Time t')
+plt.title('Lorenz-1960 Model Solution')
+plt.show()
